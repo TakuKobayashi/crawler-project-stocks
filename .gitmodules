@@ -1,0 +1,12 @@
+[submodule "projects/GovernmentOpenDataWebAPI"]
+	path = projects/GovernmentOpenDataWebAPI
+	url = git@github.com:TakuKobayashi/GovernmentOpenDataWebAPI.git
+[submodule "projects/residence-crawler"]
+	path = projects/residence-crawler
+	url = git@github.com:pinata-map/residence-crawler.git
+[submodule "projects/file-archives-and-crawler"]
+	path = projects/file-archives-and-crawler
+	url = git@github.com:TakuKobayashi/file-archives-and-crawler.git
+[submodule "projects/hackathon_portal"]
+	path = projects/hackathon_portal
+	url = git@gitlab.com:taptappun/hackathon_portal.git
