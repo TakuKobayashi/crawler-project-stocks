@@ -7,9 +7,9 @@
 [submodule "projects/file-archives-and-crawler"]
 	path = projects/file-archives-and-crawler
 	url = git@github.com:TakuKobayashi/file-archives-and-crawler.git
-[submodule "projects/hackathon_portal"]
-	path = projects/hackathon_portal
-	url = git@gitlab.com:taptappun/hackathon_portal.git
 [submodule "projects/resource-crawler"]
 	path = projects/resource-crawler
 	url = git@github.com:TakuKobayashi/resource-crawler.git
+[submodule "projects/hackathon_portal"]
+	path = projects/hackathon_portal
+	url = git@github.com:TakuKobayashi/hackathon_portal.git
