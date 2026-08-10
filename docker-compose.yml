@@ -1,7 +1,6 @@
 name: crawler-infra
 
 services:
-
   # ============================================================
   # Homepage
   # 統合ダッシュボード
@@ -16,10 +15,10 @@ services:
 
     environment:
       TZ: Asia/Tokyo
-      HOMEPAGE_ALLOWED_HOSTS: "*"
+      HOMEPAGE_ALLOWED_HOSTS: '*'
 
     ports:
-      - "13000:3000"
+      - '13000:3000'
 
     volumes:
       - ./data/homepage:/app/config
@@ -27,7 +26,6 @@ services:
 
     networks:
       - crawler-net
-
 
   # ============================================================
   # Cronicle
@@ -46,7 +44,7 @@ services:
       TZ: Asia/Tokyo
 
     ports:
-      - "3012:3012"
+      - '3012:3012'
 
     volumes:
       - ./data/cronicle/data:/opt/cronicle/data
@@ -75,7 +73,7 @@ services:
     restart: unless-stopped
 
     ports:
-      - "9443:9443"
+      - '9443:9443'
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -83,7 +81,6 @@ services:
 
     networks:
       - crawler-net
-
 
   # ============================================================
   # Uptime Kuma
@@ -98,14 +95,13 @@ services:
     restart: unless-stopped
 
     ports:
-      - "3001:3001"
+      - '3001:3001'
 
     volumes:
       - ./data/uptime-kuma:/app/data
 
     networks:
       - crawler-net
-
 
   # ============================================================
   # Cloudflare Tunnel
