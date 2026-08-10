@@ -1,23 +1,142 @@
-version: '3.8'
+name: crawler-infra
 
 services:
-  libretranslate:
-    image: libretranslate/libretranslate:latest
-    container_name: libretranslate
-    restart: unless-stopped
-    ports:
-      - '5000:5000'
-    environment:
-      LT_DISABLE_WEB_UI: 'true'
-      LT_UPDATE_MODELS: 'true'
-      LT_LOAD_ONLY: 'ja,en'
-    volumes:
-      - libretranslate_data:/home/libretranslate/.local
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:5000/languages']
-      interval: 30s
-      timeout: 10s
-      retries: 10
 
-volumes:
-  libretranslate_data:
+  # ============================================================
+  # Homepage
+  # 統合ダッシュボード
+  #
+  # Browser:
+  #   http://<NAS-IP>:13000
+  # ============================================================
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+
+    environment:
+      TZ: Asia/Tokyo
+      HOMEPAGE_ALLOWED_HOSTS: "*"
+
+    ports:
+      - "13000:3000"
+
+    volumes:
+      - ./data/homepage:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    networks:
+      - crawler-net
+
+
+  # ============================================================
+  # Cronicle
+  # Crawlerの定期実行 / 手動実行 / 実行履歴 / ログ
+  #
+  # Browser:
+  #   http://<NAS-IP>:3012
+  # ============================================================
+  cronicle:
+    image: soulteary/cronicle:latest
+    container_name: cronicle
+    hostname: cronicle
+    restart: unless-stopped
+
+    environment:
+      TZ: Asia/Tokyo
+
+    ports:
+      - "3012:3012"
+
+    volumes:
+      - ./data/cronicle/data:/opt/cronicle/data
+      - ./data/cronicle/logs:/opt/cronicle/logs
+      - ./data/cronicle/plugins:/opt/cronicle/plugins
+
+      # Crawlerプロジェクト
+      - ./projects:/projects
+
+      # CronicleからDockerコンテナを操作する場合に使用
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    networks:
+      - crawler-net
+
+  # ============================================================
+  # Portainer
+  # Dockerコンテナ管理
+  #
+  # Browser:
+  #   https://<NAS-IP>:9443
+  # ============================================================
+  portainer:
+    image: portainer/portainer-ce:lts
+    container_name: portainer
+    restart: unless-stopped
+
+    ports:
+      - "9443:9443"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/portainer:/data
+
+    networks:
+      - crawler-net
+
+
+  # ============================================================
+  # Uptime Kuma
+  # HTTP / TCP / サービス死活監視
+  #
+  # Browser:
+  #   http://<NAS-IP>:3001
+  # ============================================================
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    container_name: uptime-kuma
+    restart: unless-stopped
+
+    ports:
+      - "3001:3001"
+
+    volumes:
+      - ./data/uptime-kuma:/app/data
+
+    networks:
+      - crawler-net
+
+
+  # ============================================================
+  # Cloudflare Tunnel
+  #
+  # 外部公開ポートなし
+  # ============================================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+
+    depends_on:
+      - homepage
+      - cronicle
+      - portainer
+      - uptime-kuma
+
+    networks:
+      - crawler-net
+
+# ============================================================
+# Network
+# ============================================================
+networks:
+  crawler-net:
+    name: crawler-net
