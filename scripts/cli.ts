@@ -7,8 +7,10 @@ import { validateProjects } from './validate-projects';
 import { updateSubmodules } from './update-submodules';
 import { pushSubmodules } from './push-submodules';
 import { generateProjectYml } from './generate-project-yml';
+import { vpnCommand } from './commands/vpn';
 
 const program = new Command();
+program.addCommand(vpnCommand);
 
 type TranslateOptions = {
   ollamaUrl?: string;

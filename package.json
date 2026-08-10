@@ -11,8 +11,11 @@
     "projects:pull": "tsx scripts/cli.ts pull",
     "projects:push": "tsx scripts/cli.ts push",
     "projects:status": "tsx scripts/cli.ts status",
-    "translate:start": "docker compose up -d",
-    "translate:stop": "docker compose down",
+    "vpn:connect": "tsx scripts/cli.ts vpn connect",
+    "vpn:disconnect": "tsx scripts/cli.ts vpn disconnect",
+    "vpn:status": "tsx scripts/cli.ts vpn status",
+    "vpn:list": "tsx scripts/cli.ts vpn list",
+    "cli": "tsx scripts/cli.ts",
     "format": "prettier --write ."
   },
   "devDependencies": {
@@ -23,5 +26,8 @@
     "prettier": "^3.2.5",
     "tsx": "^4.7.1",
     "typescript": "^5.4.2"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.2"
   }
 }
