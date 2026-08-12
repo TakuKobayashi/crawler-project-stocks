@@ -1,5 +1,5 @@
 {
-  "name": "generate-ai-stocks",
+  "name": "crawler-project-stocks",
   "private": true,
   "scripts": {
     "projects:add": "tsx scripts/cli.ts add",
