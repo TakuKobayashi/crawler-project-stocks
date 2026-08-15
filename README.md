@@ -98,6 +98,75 @@ npm run projects:sync
 npm run projects:validate
 ```
 
+## VPN connection
+
+The VPN command selects a VPN Gate server and launches the OpenVPN Community `openvpn` executable installed on the host.
+OpenVPN is a native program that manages OS tunnel devices, routes, and DNS, so installing an npm package cannot safely
+install the executable and grant the required OS permissions. Install it once for each operating system:
+
+### macOS
+
+```bash
+brew install openvpn
+openvpn --version
+```
+
+### Ubuntu / Debian
+
+```bash
+sudo apt update
+sudo apt install openvpn
+openvpn --version
+```
+
+### Fedora
+
+```bash
+sudo dnf install openvpn
+openvpn --version
+```
+
+### Arch Linux
+
+```bash
+sudo pacman -S openvpn
+openvpn --version
+```
+
+### Windows 10 or later
+
+Install the Community MSI from the [official OpenVPN Community downloads](https://openvpn.net/community-downloads/).
+Enable the option that adds OpenVPN to PATH, open a new PowerShell window, and verify the installation:
+
+```powershell
+openvpn --version
+```
+
+If it is not on PATH, add the usual installation directory, `C:\Program Files\OpenVPN\bin`, to the user or system PATH.
+
+### Connect
+
+Changing network routes may require administrator privileges. If a normal command fails with a permission error, use
+`sudo pnpm vpn:connect` on macOS/Linux or an elevated PowerShell window on Windows.
+
+```bash
+pnpm vpn:connect
+pnpm vpn:status
+pnpm vpn:disconnect
+```
+
+Connection filters are optional:
+
+```bash
+pnpm vpn:connect --country JP --max-ping 100 --min-speed 10
+```
+
+### Why not Docker?
+
+OpenVPN can run in Docker, but it requires the `NET_ADMIN` capability and a TUN device. Its VPN route normally applies
+only to that container's network namespace, not to this host CLI or every crawler. Docker becomes appropriate only when
+the crawlers also run inside the VPN container's network namespace, so this repository currently uses a host installation.
+
 ---
 
 ## Submodule Workflow (Post-launch)

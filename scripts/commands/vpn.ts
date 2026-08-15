@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { parse } from 'csv-parse/sync';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const VPN_GATE_API = 'https://www.vpngate.net/api/iphone/';
@@ -12,6 +12,10 @@ const PID_PATH = path.join(RUNTIME_DIR, 'openvpn.pid');
 const STATUS_PATH = path.join(RUNTIME_DIR, 'openvpn-status.log');
 const LOG_PATH = path.join(RUNTIME_DIR, 'openvpn.log');
 const SERVER_PATH = path.join(RUNTIME_DIR, 'server.json');
+const API_TIMEOUT_MS = 15_000;
+const API_ATTEMPTS = 3;
+const CONNECTION_TIMEOUT_MS = 45_000;
+const CONNECTION_POLL_MS = 500;
 
 interface VpnServer {
   HostName: string;
@@ -46,8 +50,32 @@ function ensureRuntimeDir(): void {
   mkdirSync(RUNTIME_DIR, { recursive: true });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchServers(): Promise<VpnServer[]> {
-  const response = await fetch(VPN_GATE_API);
+  let response: Response | undefined;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= API_ATTEMPTS; attempt += 1) {
+    try {
+      response = await fetch(VPN_GATE_API, { signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+      break;
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < API_ATTEMPTS) {
+        console.warn(`VPN Gate APIへの接続に失敗しました。再試行します (${attempt}/${API_ATTEMPTS})`);
+        await sleep(attempt * 1_000);
+      }
+    }
+  }
+
+  if (!response) {
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`VPN Gate APIへ接続できませんでした (${API_ATTEMPTS}回試行): ${detail}`);
+  }
 
   if (!response.ok) {
     throw new Error(`VPN Gate API error: ${response.status} ${response.statusText}`);
@@ -135,6 +163,105 @@ function selectServer(
   return top[Math.floor(Math.random() * top.length)]!;
 }
 
+function parsePositiveNumber(value: string | undefined, name: string, options?: { allowZero?: boolean }): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  const minimum = options?.allowZero ? 0 : Number.MIN_VALUE;
+
+  if (!Number.isFinite(parsed) || parsed < minimum) {
+    throw new Error(`${name}には${options?.allowZero ? '0以上' : '0より大きい'}数値を指定してください: ${value}`);
+  }
+
+  return parsed;
+}
+
+function assertOpenVpnAvailable(): void {
+  const result = spawnSync('openvpn', ['--version'], { stdio: 'ignore' });
+
+  if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
+    throw new Error('openvpnコマンドが見つかりません。macOSでは `brew install openvpn` などでインストールしてください');
+  }
+
+  if (result.error || result.status !== 0) {
+    throw new Error(`openvpnを実行できません${result.error ? `: ${result.error.message}` : ''}`);
+  }
+}
+
+async function startOpenVpn(): Promise<void> {
+  const commonArguments = ['--config', CONFIG_PATH, '--status', STATUS_PATH, '5', '--log', LOG_PATH];
+
+  if (process.platform === 'win32') {
+    const child = spawn('openvpn', commonArguments, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', resolve);
+      child.once('error', reject);
+    });
+
+    if (!child.pid) {
+      throw new Error('OpenVPNプロセスのPIDを取得できませんでした');
+    }
+
+    writeFileSync(PID_PATH, String(child.pid), { encoding: 'utf8', mode: 0o600 });
+    child.unref();
+    return;
+  }
+
+  const result = spawnSync('openvpn', [...commonArguments, '--daemon', 'crawler-vpngate', '--writepid', PID_PATH], { stdio: 'inherit' });
+
+  if (result.error) {
+    throw new Error(`OpenVPNを起動できません: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`OpenVPN起動失敗: exit=${result.status}`);
+  }
+}
+
+function readLog(): string {
+  return existsSync(LOG_PATH) ? readFileSync(LOG_PATH, 'utf8') : '';
+}
+
+async function waitForConnection(): Promise<number> {
+  const deadline = Date.now() + CONNECTION_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const pid = readPid();
+    const log = readLog();
+
+    if (log.includes('Initialization Sequence Completed')) {
+      if (pid && processExists(pid)) {
+        return pid;
+      }
+      break;
+    }
+
+    if (pid && !processExists(pid)) {
+      break;
+    }
+
+    await sleep(CONNECTION_POLL_MS);
+  }
+
+  const pid = readPid();
+  if (pid && processExists(pid)) {
+    process.kill(pid, 'SIGTERM');
+  }
+
+  const tail = readLog().split(/\r?\n/).slice(-30).join('\n').trim();
+  for (const file of [PID_PATH, STATUS_PATH, SERVER_PATH]) {
+    rmSync(file, { force: true });
+  }
+  throw new Error(`VPN接続を確認できませんでした${tail ? `\n\nOpenVPNログ:\n${tail}` : ''}`);
+}
+
 function decodeOpenVpnConfig(server: VpnServer): string {
   return Buffer.from(server.OpenVPN_ConfigData_Base64, 'base64').toString('utf8');
 }
@@ -176,6 +303,16 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
   ensureRuntimeDir();
   cleanupStaleFiles();
 
+  const maxPing = parsePositiveNumber(options.maxPing, '--max-ping', { allowZero: true });
+  const minSpeedMbps = parsePositiveNumber(options.minSpeed, '--min-speed', { allowZero: true });
+  const top = parsePositiveNumber(options.top, '--top');
+
+  if (top === undefined || !Number.isInteger(top)) {
+    throw new Error(`--topには正の整数を指定してください: ${options.top}`);
+  }
+
+  assertOpenVpnAvailable();
+
   const existingPid = readPid();
 
   if (existingPid && processExists(existingPid)) {
@@ -190,9 +327,9 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
 
   const server = selectServer(servers, {
     country: options.country,
-    maxPing: options.maxPing !== undefined ? Number(options.maxPing) : undefined,
-    minSpeedMbps: options.minSpeed !== undefined ? Number(options.minSpeed) : undefined,
-    top: Number(options.top),
+    maxPing,
+    minSpeedMbps,
+    top,
   });
 
   const ping = number(server.Ping);
@@ -215,7 +352,9 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
   // daemon管理はこちら側で行う。
   config += '\n';
 
-  writeFileSync(CONFIG_PATH, config, 'utf8');
+  writeFileSync(CONFIG_PATH, config, { encoding: 'utf8', mode: 0o600 });
+  rmSync(LOG_PATH, { force: true });
+  rmSync(STATUS_PATH, { force: true });
 
   const saved: SavedServer = {
     hostName: server.HostName,
@@ -228,40 +367,11 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
     connectedAt: new Date().toISOString(),
   };
 
-  writeFileSync(SERVER_PATH, JSON.stringify(saved, null, 2), 'utf8');
+  await startOpenVpn();
+  const pid = await waitForConnection();
+  writeFileSync(SERVER_PATH, JSON.stringify(saved, null, 2), { encoding: 'utf8', mode: 0o600 });
 
-  const result = spawnSync(
-    'openvpn',
-    ['--config', CONFIG_PATH, '--daemon', 'crawler-vpngate', '--writepid', PID_PATH, '--status', STATUS_PATH, '5', '--log', LOG_PATH],
-    {
-      stdio: 'inherit',
-    },
-  );
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    throw new Error(`OpenVPN起動失敗: exit=${result.status}`);
-  }
-
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-
-  const pid = readPid();
-
-  if (!pid || !processExists(pid)) {
-    console.error('');
-    console.error('OpenVPNログ:');
-
-    if (existsSync(LOG_PATH)) {
-      console.error(readFileSync(LOG_PATH, 'utf8').split(/\r?\n/).slice(-30).join('\n'));
-    }
-
-    throw new Error('OpenVPNが起動後に終了しました');
-  }
-
-  console.log(`VPN接続プロセス起動完了 PID=${pid}`);
+  console.log(`VPN接続完了 PID=${pid}`);
   console.log(`ログ: ${LOG_PATH}`);
 }
 
@@ -300,6 +410,13 @@ function status(): void {
 
   if (!pid || !processExists(pid)) {
     console.log('VPN: DISCONNECTED');
+    return;
+  }
+
+  if (!readLog().includes('Initialization Sequence Completed')) {
+    console.log('VPN: CONNECTING');
+    console.log(`PID: ${pid}`);
+    console.log(`OpenVPN log: ${LOG_PATH}`);
     return;
   }
 
