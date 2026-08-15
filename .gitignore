@@ -1,6 +1,10 @@
 node_modules
 dist
 coverage
+.runtime/
+
+# Docker Compose service state (databases, logs, generated config, and keys)
+/data/
 
 .env
 .env.*
