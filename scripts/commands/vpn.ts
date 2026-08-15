@@ -263,7 +263,12 @@ async function waitForConnection(): Promise<number> {
 }
 
 function decodeOpenVpnConfig(server: VpnServer): string {
-  return Buffer.from(server.OpenVPN_ConfigData_Base64, 'base64').toString('utf8');
+  return (
+    Buffer.from(server.OpenVPN_ConfigData_Base64, 'base64')
+      .toString('utf8')
+      // OpenVPN 2.7以降では鍵は常に再起動後も保持されるため、この設定は廃止されている。
+      .replace(/^\s*persist-key(?:\s+.*)?\r?\n/gim, '')
+  );
 }
 
 function readPid(): number | null {
@@ -299,16 +304,21 @@ function cleanupStaleFiles(): void {
   }
 }
 
-async function connect(options: { country?: string; maxPing?: string; minSpeed?: string; top: string }): Promise<void> {
+async function connect(options: { country?: string; maxPing?: string; minSpeed?: string; top: string; attempts: string }): Promise<void> {
   ensureRuntimeDir();
   cleanupStaleFiles();
 
   const maxPing = parsePositiveNumber(options.maxPing, '--max-ping', { allowZero: true });
   const minSpeedMbps = parsePositiveNumber(options.minSpeed, '--min-speed', { allowZero: true });
   const top = parsePositiveNumber(options.top, '--top');
+  const attempts = parsePositiveNumber(options.attempts, '--attempts');
 
   if (top === undefined || !Number.isInteger(top)) {
     throw new Error(`--topには正の整数を指定してください: ${options.top}`);
+  }
+
+  if (attempts === undefined || !Number.isInteger(attempts)) {
+    throw new Error(`--attemptsには正の整数を指定してください: ${options.attempts}`);
   }
 
   assertOpenVpnAvailable();
@@ -325,54 +335,87 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
 
   console.log(`${servers.length} サーバー取得`);
 
-  const server = selectServer(servers, {
-    country: options.country,
-    maxPing,
-    minSpeedMbps,
-    top,
-  });
+  const attemptedServerIps = new Set<string>();
+  const failures: string[] = [];
 
-  const ping = number(server.Ping);
-  const speed = number(server.Speed);
-  const score = number(server.Score);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const remainingServers = servers.filter((server) => !attemptedServerIps.has(server.IP));
+    let server: VpnServer;
 
-  console.log('');
-  console.log('接続先:');
-  console.log(`  Country : ${server.CountryLong}`);
-  console.log(`  Host    : ${server.HostName}`);
-  console.log(`  IP      : ${server.IP}`);
-  console.log(`  Ping    : ${ping} ms`);
-  console.log(`  Speed   : ${(speed / 1_000_000).toFixed(1)} Mbps`);
-  console.log(`  Score   : ${score}`);
-  console.log('');
+    try {
+      server = selectServer(remainingServers, {
+        country: options.country,
+        maxPing,
+        minSpeedMbps,
+        top,
+      });
+    } catch (error) {
+      if (failures.length > 0) {
+        break;
+      }
+      throw error;
+    }
 
-  let config = decodeOpenVpnConfig(server);
+    attemptedServerIps.add(server.IP);
 
-  // OpenVPNが終了しにくい設定が含まれていても、
-  // daemon管理はこちら側で行う。
-  config += '\n';
+    const ping = number(server.Ping);
+    const speed = number(server.Speed);
+    const score = number(server.Score);
 
-  writeFileSync(CONFIG_PATH, config, { encoding: 'utf8', mode: 0o600 });
-  rmSync(LOG_PATH, { force: true });
-  rmSync(STATUS_PATH, { force: true });
+    console.log('');
+    console.log(`接続先 (${attempt}/${attempts}):`);
+    console.log(`  Country : ${server.CountryLong}`);
+    console.log(`  Host    : ${server.HostName}`);
+    console.log(`  IP      : ${server.IP}`);
+    console.log(`  Ping    : ${ping} ms`);
+    console.log(`  Speed   : ${(speed / 1_000_000).toFixed(1)} Mbps`);
+    console.log(`  Score   : ${score}`);
+    console.log('');
 
-  const saved: SavedServer = {
-    hostName: server.HostName,
-    ip: server.IP,
-    country: server.CountryLong,
-    countryCode: server.CountryShort,
-    ping,
-    speed,
-    score,
-    connectedAt: new Date().toISOString(),
-  };
+    const config = `${decodeOpenVpnConfig(server)}\n`;
 
-  await startOpenVpn();
-  const pid = await waitForConnection();
-  writeFileSync(SERVER_PATH, JSON.stringify(saved, null, 2), { encoding: 'utf8', mode: 0o600 });
+    writeFileSync(CONFIG_PATH, config, { encoding: 'utf8', mode: 0o600 });
+    rmSync(LOG_PATH, { force: true });
+    rmSync(STATUS_PATH, { force: true });
 
-  console.log(`VPN接続完了 PID=${pid}`);
-  console.log(`ログ: ${LOG_PATH}`);
+    const saved: SavedServer = {
+      hostName: server.HostName,
+      ip: server.IP,
+      country: server.CountryLong,
+      countryCode: server.CountryShort,
+      ping,
+      speed,
+      score,
+      connectedAt: new Date().toISOString(),
+    };
+
+    try {
+      await startOpenVpn();
+      const pid = await waitForConnection();
+      writeFileSync(SERVER_PATH, JSON.stringify(saved, null, 2), { encoding: 'utf8', mode: 0o600 });
+
+      console.log(`VPN接続完了 PID=${pid}`);
+      console.log(`ログ: ${LOG_PATH}`);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(`${server.HostName} (${server.IP}): ${message}`);
+
+      const pid = readPid();
+      if (pid && processExists(pid)) {
+        process.kill(pid, 'SIGTERM');
+      }
+      for (const file of [PID_PATH, STATUS_PATH, SERVER_PATH]) {
+        rmSync(file, { force: true });
+      }
+
+      if (attempt < attempts) {
+        console.warn(`接続に失敗しました。別のサーバーで再試行します (${attempt}/${attempts})`);
+      }
+    }
+  }
+
+  throw new Error(`VPN接続に失敗しました (${failures.length}回試行)\n\n${failures.join('\n\n')}`);
 }
 
 function disconnect(): void {
@@ -475,6 +518,7 @@ vpnCommand
   .option('--max-ping <ms>', '最大Ping値')
   .option('--min-speed <mbps>', '最低回線速度 Mbps')
   .option('--top <n>', '上位何台からランダム選択するか', '10')
+  .option('-a, --attempts <n>', '接続を試行する最大回数', '5')
   .action(connect);
 
 vpnCommand.command('disconnect').description('VPNを切断').action(disconnect);

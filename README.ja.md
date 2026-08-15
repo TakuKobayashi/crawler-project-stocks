@@ -168,6 +168,12 @@ pnpm vpn:disconnect
 pnpm vpn:connect --country JP --max-ping 100 --min-speed 10
 ```
 
+接続に失敗した場合は別のサーバーで最大5回まで自動的に再試行します。試行回数は変更できます。
+
+```bash
+pnpm vpn:connect --attempts 3
+```
+
 ### Dockerについて
 
 DockerでもOpenVPNは動かせますが、`NET_ADMIN` capabilityとTUNデバイスが必要で、VPNが適用されるのは

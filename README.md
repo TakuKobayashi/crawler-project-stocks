@@ -161,6 +161,13 @@ Connection filters are optional:
 pnpm vpn:connect --country JP --max-ping 100 --min-speed 10
 ```
 
+If a connection fails, the command automatically retries with a different server up to five times. You can change the
+maximum number of attempts:
+
+```bash
+pnpm vpn:connect --attempts 3
+```
+
 ### Why not Docker?
 
 OpenVPN can run in Docker, but it requires the `NET_ADMIN` capability and a TUN device. Its VPN route normally applies
