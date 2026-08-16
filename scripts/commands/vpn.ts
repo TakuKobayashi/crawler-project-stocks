@@ -178,7 +178,7 @@ function parsePositiveNumber(value: string | undefined, name: string, options?: 
   return parsed;
 }
 
-function assertOpenVpnAvailable(): void {
+function assertOpenVpnAvailable(): string {
   const result = spawnSync('openvpn', ['--version'], { stdio: 'ignore' });
 
   if (result.error && (result.error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -188,13 +188,28 @@ function assertOpenVpnAvailable(): void {
   if (result.error || result.status !== 0) {
     throw new Error(`openvpnを実行できません${result.error ? `: ${result.error.message}` : ''}`);
   }
+
+  if (process.platform === 'darwin') {
+    const which = spawnSync('which', ['openvpn'], { encoding: 'utf8' });
+    const executable = which.stdout.trim();
+
+    if (which.status === 0 && executable) {
+      return executable;
+    }
+  }
+
+  return 'openvpn';
 }
 
-async function startOpenVpn(): Promise<void> {
+function needsSudoForOpenVpn(): boolean {
+  return process.platform === 'darwin' && typeof process.geteuid === 'function' && process.geteuid() !== 0;
+}
+
+async function startOpenVpn(openVpnExecutable: string): Promise<void> {
   const commonArguments = ['--config', CONFIG_PATH, '--status', STATUS_PATH, '5', '--log', LOG_PATH];
 
   if (process.platform === 'win32') {
-    const child = spawn('openvpn', commonArguments, {
+    const child = spawn(openVpnExecutable, commonArguments, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -214,7 +229,10 @@ async function startOpenVpn(): Promise<void> {
     return;
   }
 
-  const result = spawnSync('openvpn', [...commonArguments, '--daemon', 'crawler-vpngate', '--writepid', PID_PATH], { stdio: 'inherit' });
+  const openVpnArguments = [...commonArguments, '--daemon', 'crawler-vpngate', '--writepid', PID_PATH];
+  const result = needsSudoForOpenVpn()
+    ? spawnSync('sudo', [openVpnExecutable, ...openVpnArguments], { stdio: 'inherit' })
+    : spawnSync(openVpnExecutable, openVpnArguments, { stdio: 'inherit' });
 
   if (result.error) {
     throw new Error(`OpenVPNを起動できません: ${result.error.message}`);
@@ -252,7 +270,7 @@ async function waitForConnection(): Promise<number> {
 
   const pid = readPid();
   if (pid && processExists(pid)) {
-    process.kill(pid, 'SIGTERM');
+    stopProcess(pid);
   }
 
   const tail = readLog().split(/\r?\n/).slice(-30).join('\n').trim();
@@ -267,7 +285,8 @@ function decodeOpenVpnConfig(server: VpnServer): string {
     Buffer.from(server.OpenVPN_ConfigData_Base64, 'base64')
       .toString('utf8')
       // OpenVPN 2.7以降では鍵は常に再起動後も保持されるため、この設定は廃止されている。
-      .replace(/^\s*persist-key(?:\s+.*)?\r?\n/gim, '')
+      // `\s` は改行にも一致するため使わず、対象の1行だけを削除する。
+      .replace(/^[ \t]*persist-key(?:[ \t]+[^\r\n]*)?\r?\n/gim, '')
   );
 }
 
@@ -285,8 +304,27 @@ function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+      return true;
+    }
     return false;
+  }
+}
+
+function stopProcess(pid: number): void {
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPERM' && needsSudoForOpenVpn()) {
+      const result = spawnSync('sudo', ['kill', '-TERM', String(pid)], { stdio: 'inherit' });
+
+      if (result.status === 0) {
+        return;
+      }
+    }
+
+    throw error;
   }
 }
 
@@ -321,8 +359,7 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
     throw new Error(`--attemptsには正の整数を指定してください: ${options.attempts}`);
   }
 
-  assertOpenVpnAvailable();
-
+  const openVpnExecutable = assertOpenVpnAvailable();
   const existingPid = readPid();
 
   if (existingPid && processExists(existingPid)) {
@@ -376,6 +413,9 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
 
     writeFileSync(CONFIG_PATH, config, { encoding: 'utf8', mode: 0o600 });
     rmSync(LOG_PATH, { force: true });
+    // OpenVPNはmacOSではrootで動くが、接続確認はこのプロセスがログを読んで行う。
+    // 先に通常ユーザー所有で作成しておけば、rootが追記した後も読み取れる。
+    writeFileSync(LOG_PATH, '', { encoding: 'utf8', mode: 0o600 });
     rmSync(STATUS_PATH, { force: true });
 
     const saved: SavedServer = {
@@ -390,7 +430,7 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
     };
 
     try {
-      await startOpenVpn();
+      await startOpenVpn(openVpnExecutable);
       const pid = await waitForConnection();
       writeFileSync(SERVER_PATH, JSON.stringify(saved, null, 2), { encoding: 'utf8', mode: 0o600 });
 
@@ -403,11 +443,13 @@ async function connect(options: { country?: string; maxPing?: string; minSpeed?:
 
       const pid = readPid();
       if (pid && processExists(pid)) {
-        process.kill(pid, 'SIGTERM');
+        stopProcess(pid);
       }
       for (const file of [PID_PATH, STATUS_PATH, SERVER_PATH]) {
         rmSync(file, { force: true });
       }
+
+      console.warn(`接続失敗の理由:\n${message}`);
 
       if (attempt < attempts) {
         console.warn(`接続に失敗しました。別のサーバーで再試行します (${attempt}/${attempts})`);
@@ -436,7 +478,7 @@ function disconnect(): void {
 
   console.log(`OpenVPNを停止します PID=${pid}`);
 
-  process.kill(pid, 'SIGTERM');
+  stopProcess(pid);
 
   rmSync(PID_PATH, {
     force: true,
