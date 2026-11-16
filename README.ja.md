@@ -70,14 +70,13 @@ CLI / GitHub Actions / 自動化基盤
 
 ## プロジェクト一覧
 
-| プロジェクト | 説明 | status |
-| ------------ | ---- | ------ |
-| [auto-calender-register](./projects/auto-calender-register/) | auto regist to my calender | incubating |
-| [file-archives-and-crawler](./projects/file-archives-and-crawler/) | GitHubリポジトリなど、様々なソースからファイルをクロールしてアーカイブするサーバーレスアーキテクチャを採用したツールです。 | incubating |
-| [GovernmentOpenDataWebAPI](./projects/GovernmentOpenDataWebAPI/) | 政府が公開しているオープンデータを収集し、Web APIとして提供することで、データ形式や文字コードを統一し、利用しやすいようにしました。 | incubating |
-| [hackathon_portal](./projects/hackathon_portal/) |  | incubating |
-| [residence-crawler](./projects/residence-crawler/) |  | incubating |
-| [resource-crawler](./projects/resource-crawler/) |  | incubating |
+| プロジェクト                                                     | 説明                       | status     |
+| ---------------------------------------------------------------- | -------------------------- | ---------- |
+| [auto-calender-register](./projects/auto-calender-register/)     | auto regist to my calender | incubating |
+| [GovernmentOpenDataWebAPI](./projects/GovernmentOpenDataWebAPI/) |                            | incubating |
+| [hackathon_portal](./projects/hackathon_portal/)                 |                            | incubating |
+| [residence-crawler](./projects/residence-crawler/)               |                            | incubating |
+| [resource-crawler](./projects/resource-crawler/)                 |                            | incubating |
 
 ---
 

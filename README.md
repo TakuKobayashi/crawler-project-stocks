@@ -69,14 +69,13 @@ Samples / infrastructure experiments / reusable technical foundations
 
 ## Projects
 
-| Project | Description | status |
-| ------- | ----------- | ------ |
-| [auto-calender-register](./projects/auto-calender-register/) | An auto-registered calendar event for my calendar. | incubating |
-| [file-archives-and-crawler](./projects/file-archives-and-crawler/) | Crawls and archives files from various sources, likely GitHub repositories, using a serverless architecture. | incubating |
-| [GovernmentOpenDataWebAPI](./projects/GovernmentOpenDataWebAPI/) | Provides a Web API for government open data, standardizing formats and encoding to facilitate easier access and utilization. | incubating |
-| [hackathon_portal](./projects/hackathon_portal/) |  | incubating |
-| [residence-crawler](./projects/residence-crawler/) |  | incubating |
-| [resource-crawler](./projects/resource-crawler/) |  | incubating |
+| Project                                                          | Description                                        | status     |
+| ---------------------------------------------------------------- | -------------------------------------------------- | ---------- |
+| [auto-calender-register](./projects/auto-calender-register/)     | An auto-registered calendar event for my calendar. | incubating |
+| [GovernmentOpenDataWebAPI](./projects/GovernmentOpenDataWebAPI/) |                                                    | incubating |
+| [hackathon_portal](./projects/hackathon_portal/)                 |                                                    | incubating |
+| [residence-crawler](./projects/residence-crawler/)               |                                                    | incubating |
+| [resource-crawler](./projects/resource-crawler/)                 |                                                    | incubating |
 
 ---
 
