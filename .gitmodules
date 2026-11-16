@@ -13,3 +13,6 @@
 [submodule "projects/hackathon_portal"]
 	path = projects/hackathon_portal
 	url = git@github.com:TakuKobayashi/hackathon_portal.git
+[submodule "projects/auto-calender-register"]
+	path = projects/auto-calender-register
+	url = git@github.com:TakuKobayashi/auto-calender-register.git
